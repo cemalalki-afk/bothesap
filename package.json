@@ -1,0 +1,13 @@
+{
+  "name": "bothesap",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "start": "node --import tsx/esm src/index.ts",
+    "dev": "tsx watch src/index.ts"
+  },
+  "dependencies": {
+    "discord.js": "^14.19.3",
+    "tsx": "^4.21.0"
+  }
+}
