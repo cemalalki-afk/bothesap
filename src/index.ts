@@ -1,3 +1,4 @@
+import http from "http";
 import {
   Client,
   GatewayIntentBits,
@@ -5,6 +6,13 @@ import {
   PermissionFlagsBits,
 } from "discord.js";
 import { getRandomAccount, removeAccount, addAccounts, accountCount } from "./combolist.js";
+
+// Render.com'un botu uyutmaması için basit HTTP server
+const port = process.env.PORT ?? "3000";
+http.createServer((_, res) => {
+  res.writeHead(200);
+  res.end("Bot aktif!");
+}).listen(port, () => console.log(`Keep-alive server: ${port}`));
 
 const token = process.env.DISCORD_BOT_TOKEN;
 const clientId = process.env.DISCORD_CLIENT_ID;
