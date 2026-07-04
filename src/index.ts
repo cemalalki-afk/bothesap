@@ -14,8 +14,11 @@ if (!token || !clientId) {
   process.exit(1);
 }
 
+const guildMembersEnabled = process.env["GUILD_MEMBERS_INTENT"] === "true";
 const client = new Client({
-  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers],
+  intents: guildMembersEnabled
+    ? [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers]
+    : [GatewayIntentBits.Guilds],
 });
 
 const cooldowns = new Map<string, number>();
@@ -150,7 +153,6 @@ client.on("interactionCreate", async (interaction: Interaction) => {
     await interaction.deferReply({ ephemeral: true });
 
     try {
-      await guild.members.fetch();
       const members = guild.members.cache.filter((m) => !m.user.bot && !m.roles.cache.has(role.id));
       let success = 0;
       let fail = 0;
