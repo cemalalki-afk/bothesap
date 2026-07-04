@@ -2,7 +2,6 @@ import {
   Client,
   GatewayIntentBits,
   Interaction,
-  AttachmentBuilder,
   PermissionFlagsBits,
 } from "discord.js";
 import { getRandomAccount, removeAccount, addAccounts, accountCount } from "./combolist.js";
@@ -16,15 +15,28 @@ if (!token || !clientId) {
 }
 
 const client = new Client({
-  intents: [GatewayIntentBits.Guilds],
+  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers],
 });
 
 const cooldowns = new Map<string, number>();
 const COOLDOWN_MS = 60_000;
+let autoRoleId: string | null = null;
 
-client.once("ready", () => {
+client.once("clientReady", () => {
   console.log(`Bot aktif: ${client.user?.tag}`);
   console.log(`Combolist'te ${accountCount()} hesap var.`);
+});
+
+client.on("guildMemberAdd", async (member) => {
+  if (!autoRoleId) return;
+  try {
+    const role = member.guild.roles.cache.get(autoRoleId);
+    if (!role) return;
+    await member.roles.add(role);
+    console.log(`[Autorol] ${member.user.tag} → ${role.name}`);
+  } catch (err) {
+    console.error("[Autorol] Rol verilemedi:", err);
+  }
 });
 
 client.on("interactionCreate", async (interaction: Interaction) => {
@@ -32,13 +44,15 @@ client.on("interactionCreate", async (interaction: Interaction) => {
 
   const { commandName, user } = interaction;
 
+  try {
+
   if (commandName === "hesap") {
     const member = interaction.guild?.members.cache.get(user.id);
     const hasBlockedRole = member?.roles.cache.some((r) => r.name === "üye");
 
     if (hasBlockedRole) {
       await interaction.reply({
-        content: "❌ **Üye** rolüyle bu komutu kullanamazsın!",
+        content: "❌ **üye** rolüyle bu komutu kullanamazsın!",
         ephemeral: true,
       });
       return;
@@ -58,7 +72,6 @@ client.on("interactionCreate", async (interaction: Interaction) => {
     }
 
     const account = getRandomAccount();
-
     if (!account) {
       await interaction.reply({
         content: "❌ Combolist boş! Yöneticiden hesap yüklemesini iste.",
@@ -92,23 +105,19 @@ client.on("interactionCreate", async (interaction: Interaction) => {
     }
 
     await interaction.deferReply({ ephemeral: true });
-
     const attachment = interaction.options.getAttachment("dosya", true);
 
     try {
       const response = await fetch(attachment.url);
       if (!response.ok) throw new Error("Dosya indirilemedi");
-
       const text = await response.text();
       const lines = text.split("\n").map((l) => l.trim()).filter((l) => l.length > 0);
       const added = addAccounts(lines);
-
       await interaction.editReply({
         content: `✅ **${added}** yeni hesap eklendi! Toplam stok: **${accountCount()}**`,
       });
-
       console.log(`[${new Date().toISOString()}] ${user.tag} → ${added} hesap yükledi`);
-    } catch (err) {
+    } catch {
       await interaction.editReply({
         content: "❌ Dosya okunurken hata oluştu. .txt formatında yüklediğinden emin ol.",
       });
@@ -117,12 +126,80 @@ client.on("interactionCreate", async (interaction: Interaction) => {
   }
 
   if (commandName === "stok") {
-    const count = accountCount();
     await interaction.reply({
-      content: `📦 Combolist'te şu an **${count}** hesap var.`,
+      content: `📦 Combolist'te şu an **${accountCount()}** hesap var.`,
       ephemeral: true,
     });
     return;
+  }
+
+  if (commandName === "toplurolver") {
+    const member = interaction.guild?.members.cache.get(user.id);
+    const isAdmin = member?.permissions.has(PermissionFlagsBits.Administrator);
+    if (!isAdmin) {
+      await interaction.reply({
+        content: "❌ Bu komutu sadece **yöneticiler** kullanabilir.",
+        ephemeral: true,
+      });
+      return;
+    }
+
+    const role = interaction.options.getRole("rol", true);
+    const guild = interaction.guild!;
+
+    await interaction.deferReply({ ephemeral: true });
+
+    try {
+      await guild.members.fetch();
+      const members = guild.members.cache.filter((m) => !m.user.bot && !m.roles.cache.has(role.id));
+      let success = 0;
+      let fail = 0;
+
+      for (const [, m] of members) {
+        try {
+          await m.roles.add(role.id);
+          success++;
+        } catch {
+          fail++;
+        }
+      }
+
+      await interaction.editReply({
+        content: `✅ **${success}** üyeye **${role.name}** rolü verildi.${fail > 0 ? ` (${fail} kişiye verilemedi)` : ""}`,
+      });
+      console.log(`[Toplu Rol] ${user.tag} → ${role.name}, başarı: ${success}, hata: ${fail}`);
+    } catch {
+      await interaction.editReply({
+        content: "❌ Rol verilirken hata oluştu. Botun rolü verme yetkisi olduğundan emin ol.",
+      });
+    }
+    return;
+  }
+
+  if (commandName === "autorol") {
+    const member = interaction.guild?.members.cache.get(user.id);
+    const isAdmin = member?.permissions.has(PermissionFlagsBits.Administrator);
+    if (!isAdmin) {
+      await interaction.reply({
+        content: "❌ Bu komutu sadece **yöneticiler** kullanabilir.",
+        ephemeral: true,
+      });
+      return;
+    }
+
+    const role = interaction.options.getRole("rol", true);
+    autoRoleId = role.id;
+
+    await interaction.reply({
+      content: `✅ Autorol ayarlandı! Sunucuya yeni katılan herkese **${role.name}** rolü otomatik verilecek.`,
+      ephemeral: true,
+    });
+    console.log(`[Autorol] ${user.tag} → ${role.name} ayarlandı`);
+    return;
+  }
+
+  } catch (err) {
+    console.error("Interaction hatası:", err);
   }
 });
 
