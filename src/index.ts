@@ -42,8 +42,18 @@ const COOLDOWN_MS = 60_000;
 let autoRoleId: string | null = null;
 let aboneRoleId: string | null = null;
 
-async function analyzeScreenshot(imageUrl: string): Promise<{ verified: boolean; reason: string }> {
-  if (!gemini) return { verified: false, reason: "Gemini API key eksik." };
+// Her Discord kullanıcısı ve her YouTube hesabı yalnızca 1 kez doğrulayabilir
+const verifiedDiscordIds = new Set<string>();
+const usedYoutubeAccounts = new Set<string>();
+
+interface AnalysisResult {
+  verified: boolean;
+  reason: string;
+  youtubeUsername: string;
+}
+
+async function analyzeScreenshot(imageUrl: string): Promise<AnalysisResult> {
+  if (!gemini) return { verified: false, reason: "Gemini API key eksik.", youtubeUsername: "" };
 
   try {
     const response = await fetch(imageUrl);
@@ -65,12 +75,14 @@ async function analyzeScreenshot(imageUrl: string): Promise<{ verified: boolean;
 1. ABONE OLUP OLMADIĞINI — "Abone olundu" butonu veya abone ikonu görünüyor mu?
 2. VİDEOYA LIKE ATIP ATMADĞINI — beğeni (like) ikonu aktif/dolu görünüyor mu?
 3. VİDEOYA YORUM YAPIP YAPMADĞINI — yorumlar bölümünde bu kullanıcıya ait bir yorum var mı?
+4. YORUM YAPAN KİŞİNİN YOUTUBE KULLANICI ADINI — yorumdaki kullanıcı adını oku (örn: @kullanici123)
 
 Sadece şu JSON formatında yanıt ver, başka hiçbir şey yazma:
-{"verified": true, "reason": "kısa açıklama"}
+{"verified": true, "reason": "kısa açıklama", "youtubeUsername": "@kullanici123"}
 veya
-{"verified": false, "reason": "eksik olan şeyin kısa açıklaması"}
+{"verified": false, "reason": "eksik olan şeyin kısa açıklaması", "youtubeUsername": "@kullanici123"}
 
+youtubeUsername: Yorumu atan kişinin kullanıcı adını yaz. Yorum yoksa veya okunamıyorsa boş string bırak.
 Eğer 3 koşulun hepsini görsel olarak onaylayabiliyorsan verified=true, herhangi biri eksik veya görünmüyorsa verified=false.`,
             },
           ],
@@ -80,11 +92,11 @@ Eğer 3 koşulun hepsini görsel olarak onaylayabiliyorsan verified=true, herhan
 
     const text = result.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
     const jsonMatch = text.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) return { verified: false, reason: "Görsel analiz edilemedi." };
-    return JSON.parse(jsonMatch[0]) as { verified: boolean; reason: string };
+    if (!jsonMatch) return { verified: false, reason: "Görsel analiz edilemedi.", youtubeUsername: "" };
+    return JSON.parse(jsonMatch[0]) as AnalysisResult;
   } catch (err) {
     console.error("Gemini analiz hatası:", err);
-    return { verified: false, reason: "Analiz sırasında hata oluştu." };
+    return { verified: false, reason: "Analiz sırasında hata oluştu.", youtubeUsername: "" };
   }
 }
 
@@ -294,6 +306,15 @@ client.on("interactionCreate", async (interaction: Interaction) => {
       return;
     }
 
+    // Bu Discord hesabı daha önce doğrulandı mı?
+    if (verifiedDiscordIds.has(user.id)) {
+      await interaction.reply({
+        content: "❌ Bu Discord hesabı zaten doğrulandı! Her hesap yalnızca **bir kez** doğrulama yapabilir.",
+        ephemeral: true,
+      });
+      return;
+    }
+
     const attachment = interaction.options.getAttachment("ss", true);
 
     if (!attachment.contentType?.startsWith("image/")) {
@@ -306,30 +327,43 @@ client.on("interactionCreate", async (interaction: Interaction) => {
 
     await interaction.deferReply({ ephemeral: true });
 
-    const { verified, reason } = await analyzeScreenshot(attachment.url);
+    const { verified, reason, youtubeUsername } = await analyzeScreenshot(attachment.url);
 
-    if (verified) {
-      if (aboneRoleId && interaction.guild) {
-        try {
-          const member = interaction.guild.members.cache.get(user.id);
-          if (member) {
-            await member.roles.add(aboneRoleId);
-          }
-        } catch (err) {
-          console.error("[Dogrula] Rol verilemedi:", err);
-        }
-      }
-
-      await interaction.editReply({
-        content: `✅ **Doğrulama başarılı!** ${aboneRoleId ? "**Abone** rolü verildi! 🎉" : "Yönetici henüz abone rolü ayarlamamış."}\n\n📋 ${reason}`,
-      });
-      console.log(`[Dogrula] ✅ ${user.tag} doğrulandı`);
-    } else {
+    if (!verified) {
       await interaction.editReply({
         content: `❌ **Doğrulama başarısız!**\n\n📋 ${reason}\n\nRiseVLTR kanalına **abone ol**, herhangi bir **videoya like at** ve **yorum yap**, sonra tekrar dene.`,
       });
       console.log(`[Dogrula] ❌ ${user.tag} reddedildi: ${reason}`);
+      return;
     }
+
+    // Aynı YouTube hesabı daha önce kullanıldı mı?
+    const ytKey = youtubeUsername.toLowerCase().trim();
+    if (ytKey && usedYoutubeAccounts.has(ytKey)) {
+      await interaction.editReply({
+        content: `❌ **Bu YouTube hesabı (**${youtubeUsername}**) zaten başkası tarafından kullanıldı!**\n\nHer YouTube hesabıyla yalnızca **bir kez** doğrulama yapılabilir. Kendi hesabınla tekrar dene.`,
+      });
+      console.log(`[Dogrula] ❌ ${user.tag} — YouTube hesabı zaten kullanılmış: ${youtubeUsername}`);
+      return;
+    }
+
+    // Kaydet — artık bu Discord ve YouTube hesabı kullanılamaz
+    verifiedDiscordIds.add(user.id);
+    if (ytKey) usedYoutubeAccounts.add(ytKey);
+
+    if (aboneRoleId && interaction.guild) {
+      try {
+        const member = interaction.guild.members.cache.get(user.id);
+        if (member) await member.roles.add(aboneRoleId);
+      } catch (err) {
+        console.error("[Dogrula] Rol verilemedi:", err);
+      }
+    }
+
+    await interaction.editReply({
+      content: `✅ **Doğrulama başarılı!** ${aboneRoleId ? "**Abone** rolü verildi! 🎉" : "Yönetici henüz abone rolü ayarlamamış."}\n\n📋 ${reason}`,
+    });
+    console.log(`[Dogrula] ✅ ${user.tag} doğrulandı — YouTube: ${youtubeUsername}`);
     return;
   }
 
