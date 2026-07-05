@@ -14,8 +14,8 @@
     "discord.js": "^14.19.3"
   },
   "devDependencies": {
-    "@types/node": "catalog:",
-    "tsx": "catalog:",
+    "@types/node": "^25.3.3",
+    "tsx": "^4.21.0",
     "typescript": "~5.9.3"
   }
 }
