@@ -4,6 +4,9 @@ import {
   GatewayIntentBits,
   Interaction,
   PermissionFlagsBits,
+  REST,
+  Routes,
+  SlashCommandBuilder,
 } from "discord.js";
 import { GoogleGenAI } from "@google/genai";
 import { getRandomAccount, removeAccount, addAccounts, accountCount } from "./combolist.js";
@@ -100,9 +103,45 @@ Eğer 3 koşulun hepsini görsel olarak onaylayabiliyorsan verified=true, herhan
   }
 }
 
-client.once("clientReady", () => {
+async function registerCommands() {
+  const rest = new REST({ version: "10" }).setToken(token!);
+  const commands = [
+    new SlashCommandBuilder().setName("hesap").setDescription("Combolist'ten rastgele bir hesap alırsın (1 dakika bekleme süresi var)"),
+    new SlashCommandBuilder().setName("stok").setDescription("Combolist'te kaç hesap kaldığını gösterir"),
+    new SlashCommandBuilder()
+      .setName("yukle")
+      .setDescription("Combolist'e hesap yükle (sadece yöneticiler)")
+      .addAttachmentOption((o) => o.setName("dosya").setDescription("email:sifre formatında .txt dosyası").setRequired(true)),
+    new SlashCommandBuilder()
+      .setName("toplurolver")
+      .setDescription("Sunucudaki herkese belirtilen rolü verir (sadece yöneticiler)")
+      .addRoleOption((o) => o.setName("rol").setDescription("Verilecek rol").setRequired(true)),
+    new SlashCommandBuilder()
+      .setName("autorol")
+      .setDescription("Yeni katılan üyelere otomatik rol atar (sadece yöneticiler)")
+      .addRoleOption((o) => o.setName("rol").setDescription("Otomatik verilecek rol").setRequired(true)),
+    new SlashCommandBuilder()
+      .setName("dogrula")
+      .setDescription("YouTube'da RiseVLTR'ye abone olduğunu, like ve yorum attığını SS ile kanıtla")
+      .addAttachmentOption((o) => o.setName("ss").setDescription("Abone, like ve yorum gösteren ekran görüntüsü").setRequired(true)),
+    new SlashCommandBuilder()
+      .setName("abonerol")
+      .setDescription("Doğrulama sonrası verilecek rolü ayarla (sadece yöneticiler)")
+      .addRoleOption((o) => o.setName("rol").setDescription("Abone rolü").setRequired(true)),
+  ].map((c) => c.toJSON());
+
+  try {
+    await rest.put(Routes.applicationCommands(clientId!), { body: commands });
+    console.log("Slash komutlar kaydedildi.");
+  } catch (err) {
+    console.error("Komut kayıt hatası:", err);
+  }
+}
+
+client.once("clientReady", async () => {
   console.log(`Bot aktif: ${client.user?.tag}`);
   console.log(`Combolist'te ${accountCount()} hesap var.`);
+  await registerCommands();
 });
 
 client.on("guildMemberAdd", async (member) => {
